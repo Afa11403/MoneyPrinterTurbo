@@ -7979,6 +7979,72 @@ def _render_subtitle_settings(panel, params):
                 st.toast(tr("Default Subtitle Settings Restored"))
 
 
+END_CARD_LOGO_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def get_all_logos():
+    """列出 resource/logos 中可用作片尾卡的图片文件名。"""
+    logo_root = utils.logo_dir()
+    return sorted(
+        name
+        for name in os.listdir(logo_root)
+        if name.lower().endswith(END_CARD_LOGO_EXTENSIONS)
+        and os.path.isfile(os.path.join(logo_root, name))
+    )
+
+
+def _render_end_card_settings(panel, params):
+    """渲染片尾卡设置：在视频最后几秒叠加 logo 与下单引导文字。"""
+    with panel:
+        with st.container(border=True):
+            st.write(tr("End Card Settings"))
+            st.session_state.setdefault(
+                "end_card_text_input", config.ui.get("end_card_text", "")
+            )
+            params.end_card_text = st.text_input(
+                tr("End Card Text"),
+                max_chars=200,
+                placeholder=tr("End Card Text Placeholder"),
+                key="end_card_text_input",
+            ).strip()
+            _set_runtime_config("ui", "end_card_text", params.end_card_text)
+
+            logos = get_all_logos()
+            st.session_state.setdefault(
+                "end_card_logo_select", config.ui.get("end_card_logo") or None
+            )
+            if st.session_state["end_card_logo_select"] not in logos:
+                # 用户删除了已保存的 logo 文件时回退为不使用 logo。
+                st.session_state["end_card_logo_select"] = None
+            # 未选择（None）表示不使用 logo；清空选择即可取消。
+            params.end_card_logo = (
+                st.selectbox(
+                    tr("End Card Logo"),
+                    options=logos,
+                    index=None,
+                    placeholder=tr("No Logo"),
+                    help=tr("End Card Logo Help"),
+                    key="end_card_logo_select",
+                )
+                or ""
+            )
+            _set_runtime_config("ui", "end_card_logo", params.end_card_logo)
+
+            st.session_state.setdefault(
+                "end_card_duration_input",
+                float(config.ui.get("end_card_duration", 3.0)),
+            )
+            params.end_card_duration = st.slider(
+                tr("End Card Duration"),
+                min_value=1.0,
+                max_value=10.0,
+                step=0.5,
+                disabled=not (params.end_card_text or params.end_card_logo),
+                key="end_card_duration_input",
+            )
+            _set_runtime_config("ui", "end_card_duration", params.end_card_duration)
+
+
 def _stage_task_audio(audio_path, audio_bytes):
     """Publish task-local audio only after the complete write succeeds."""
     descriptor = None
@@ -8472,6 +8538,7 @@ def _render_application():
     )
 
     _render_subtitle_settings(right_panel, params)
+    _render_end_card_settings(right_panel, params)
 
     generation_submitted = _render_generation_controls(
         params,

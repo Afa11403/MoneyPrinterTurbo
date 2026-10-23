@@ -1566,6 +1566,122 @@ def subtitle_font_supports_text(font_path: str, text: str) -> bool:
     return _subtitle_font_supports_sample(font_path, sample)
 
 
+END_CARD_DEFAULT_FONT = "STHeitiMedium.ttc"
+
+
+def resolve_end_card_logo(unsafe_name: str) -> str:
+    """Resolve a logo file name inside resource/logos, or return "" if unsafe."""
+    if not unsafe_name:
+        return ""
+    try:
+        # 与 BGM 相同：API 传入的文件名只允许落在 logo 目录，防止读取任意文件。
+        return file_security.resolve_path_within_directory(utils.logo_dir(), unsafe_name)
+    except ValueError as exc:
+        logger.warning(f"reject unsafe end card logo: {unsafe_name}, error: {str(exc)}")
+        return ""
+
+
+def render_end_card_image(
+    width: int,
+    height: int,
+    text: str,
+    logo_path: str,
+    font_path: str,
+    text_color: str = "#FFFFFF",
+) -> Image.Image | None:
+    """Draw a full-frame translucent end card with an optional logo and text.
+
+    Returns None when there is nothing to show, so callers can skip the overlay.
+    """
+    logo = None
+    if logo_path:
+        try:
+            with Image.open(logo_path) as source:
+                logo = ImageOps.exif_transpose(source).convert("RGBA")
+            max_side = int(min(width, height) * 0.4)
+            logo.thumbnail((max_side, max_side))
+        except Exception as exc:
+            logger.warning(f"failed to load end card logo: {logo_path}, error: {str(exc)}")
+            logo = None
+
+    text = (text or "").strip()
+    lines = []
+    font = None
+    font_size = max(24, int(min(width, height) * 0.055))
+    if text:
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+            wrapped, _ = wrap_text(
+                text, max_width=int(width * 0.85), font=font_path, fontsize=font_size
+            )
+            lines = wrapped.split("\n")
+        except Exception as exc:
+            logger.warning(f"failed to render end card text: {str(exc)}")
+            lines = []
+
+    if logo is None and not lines:
+        return None
+
+    stroke_width = max(1, font_size // 20)
+    line_height = int(font_size * 1.35)
+    gap = int(height * 0.03) if logo is not None and lines else 0
+    content_height = (logo.height if logo is not None else 0) + gap + line_height * len(lines)
+
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 170))
+    y = max(0, (height - content_height) // 2)
+    if logo is not None:
+        image.alpha_composite(logo, ((width - logo.width) // 2, y))
+        y += logo.height + gap
+
+    draw = ImageDraw.Draw(image)
+    fill = _hex_to_rgb(text_color) + (255,)
+    for line in lines:
+        left, _, right, _ = draw.textbbox((0, 0), line, font=font, stroke_width=stroke_width)
+        draw.text(
+            ((width - (right - left)) // 2 - left, y),
+            line,
+            font=font,
+            fill=fill,
+            stroke_width=stroke_width,
+            stroke_fill=(0, 0, 0, 255),
+        )
+        y += line_height
+    return image
+
+
+def _build_end_card_clip(params, width: int, height: int, video_duration: float, font_path: str):
+    text = (getattr(params, "end_card_text", "") or "").strip()
+    logo_path = resolve_end_card_logo(getattr(params, "end_card_logo", "") or "")
+    if not text and not logo_path:
+        return None
+
+    if not font_path:
+        try:
+            font_path = file_security.resolve_path_within_directory(
+                utils.font_dir(), params.font_name or END_CARD_DEFAULT_FONT
+            )
+        except ValueError:
+            font_path = os.path.join(utils.font_dir(), END_CARD_DEFAULT_FONT)
+
+    if text and not subtitle_font_supports_text(font_path, text):
+        logger.warning(f"end card font may not support every character: {font_path}")
+
+    image = render_end_card_image(
+        width, height, text, logo_path, font_path, params.text_fore_color or "#FFFFFF"
+    )
+    if image is None or not video_duration:
+        return None
+
+    duration = min(float(params.end_card_duration or 3.0), float(video_duration))
+    logger.info(f"  ⑥ end card: {duration}s, logo={bool(logo_path)}, text={bool(text)}")
+    return (
+        ImageClip(np.array(image), transparent=True)
+        .with_start(video_duration - duration)
+        .with_duration(duration)
+        .with_position((0, 0))
+    )
+
+
 def generate_video(
     video_path: str,
     audio_path: str,
@@ -1821,6 +1937,13 @@ def generate_video(
                 clip = create_text_clip(subtitle_item=item)
                 text_clips.append(clip)
             video_clip = CompositeVideoClip([video_clip, *text_clips])
+            clip_stack.callback(video_clip.close)
+
+        end_card_clip = _build_end_card_clip(
+            params, video_width, video_height, video_clip.duration, font_path
+        )
+        if end_card_clip is not None:
+            video_clip = CompositeVideoClip([video_clip, end_card_clip])
             clip_stack.callback(video_clip.close)
 
         bgm_enabled = bgm_service.should_use_bgm(

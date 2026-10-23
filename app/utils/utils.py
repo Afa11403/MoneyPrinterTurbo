@@ -121,6 +121,14 @@ def font_dir(sub_dir: str = ""):
     return d
 
 
+def logo_dir(sub_dir: str = ""):
+    d = resource_dir("logos")
+    if sub_dir:
+        d = os.path.join(d, sub_dir)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def song_dir(sub_dir: str = ""):
     d = resource_dir("songs")
     if sub_dir:
