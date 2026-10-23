@@ -36,6 +36,7 @@ from app.services import (
 from app.services import upload_post
 from app.services import state as sm
 from app.utils import file_security, utils
+from app.utils.chinese_variant import to_language_variant
 from app.utils.subtitle_writer import staged_subtitle_file
 
 
@@ -367,6 +368,7 @@ def generate_script(task_id, params):
             custom_system_prompt=params.custom_system_prompt,
         )
     else:
+        video_script = to_language_variant(video_script, params.video_language)
         logger.debug(f"video script: \n{video_script}")
 
     if not video_script:

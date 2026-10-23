@@ -17,6 +17,7 @@ from openai.types.chat import ChatCompletion
 from app.config import config
 from app.models.llm_provider import DEFAULT_LLM_PROVIDER_ID, get_llm_provider
 from app.utils import utils
+from app.utils.chinese_variant import to_language_variant, traditional_profile
 from app.utils.request_logging import trace_sdk_call
 
 _max_retries = 5
@@ -882,6 +883,8 @@ def build_script_prompt(
 """.rstrip()
     if language:
         prompt += f"\n- language: {language}"
+        if traditional_profile(language):
+            prompt += " (write in Traditional Chinese characters, not Simplified)"
     if video_script_prompt:
         prompt += f"""
 
@@ -987,6 +990,7 @@ def generate_script(
     if not final_script:
         logger.error("failed to generate video script after retries")
     else:
+        final_script = to_language_variant(final_script, language)
         logger.success(f"completed: \n{final_script}")
     return final_script.strip()
 
@@ -1358,6 +1362,14 @@ def _fallback_social_metadata(
     }
 
 
+def _to_social_language_variant(metadata: dict, language: str) -> dict:
+    return {
+        "title": to_language_variant(metadata["title"], language),
+        "caption": to_language_variant(metadata["caption"], language),
+        "hashtags": [to_language_variant(tag, language) for tag in metadata["hashtags"]],
+    }
+
+
 def generate_social_metadata(
     video_subject: str,
     video_script: str = "",
@@ -1394,7 +1406,9 @@ def generate_social_metadata(
             if isinstance(response, str) and response.startswith("Error: "):
                 logger.error(f"failed to generate social metadata: {response}")
                 break
-            metadata = _parse_social_metadata(response, platform)
+            metadata = _to_social_language_variant(
+                _parse_social_metadata(response, platform), language
+            )
             logger.success(f"completed: \n{metadata}")
             return metadata
         except Exception as e:
@@ -1406,7 +1420,9 @@ def generate_social_metadata(
             )
 
     logger.warning("falling back to heuristic social metadata")
-    return _fallback_social_metadata(video_subject, video_script, platform)
+    return _to_social_language_variant(
+        _fallback_social_metadata(video_subject, video_script, platform), language
+    )
 
 
 if __name__ == "__main__":
