@@ -164,6 +164,11 @@ class VideoParams(BaseModel):
     stroke_color: Optional[str] = "#000000"
     stroke_width: float = Field(default=1.5, ge=0, allow_inf_nan=False)
     n_threads: Optional[int] = 2
+    # End card shown over the last seconds of the video, e.g. a logo plus
+    # "order on Shopee / LINE". Empty text and logo disable it.
+    end_card_text: str = Field(default="", max_length=200)
+    end_card_logo: str = ""  # file name inside resource/logos
+    end_card_duration: float = Field(default=3.0, ge=1, le=10, allow_inf_nan=False)
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
